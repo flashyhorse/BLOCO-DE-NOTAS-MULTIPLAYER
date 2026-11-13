@@ -28,15 +28,16 @@ function tema_criar(int $uid, string $nome): int
 {
     validar_nome_tema($nome);
     try {
-        $r = consultar_um('INSERT INTO temas (usuario_id, nome) VALUES (:u, :n) RETURNING id',
-                          ['u' => $uid, 'n' => $nome]);
+        executar('INSERT INTO temas (usuario_id, nome) VALUES (:u, :n)',
+                 ['u' => $uid, 'n' => $nome]);
+        $id = ultimo_id();
     } catch (PDOException $e) {
         if (erro_duplicado($e)) {
             throw new ErroApp('Você já tem um tema com este nome.');
         }
         throw $e;
     }
-    return (int) $r['id'];
+    return $id;
 }
 
 function tema_renomear(int $uid, int $id, string $nome): void

@@ -1,6 +1,6 @@
-# Bloco de Notas Compartilhado — PHP + PostgreSQL
+# Bloco de Notas Compartilhado — PHP + MySQL
 
-CRUD web do projeto **Senai Joinville**, escrito em PHP puro (sem framework) sobre PostgreSQL.
+CRUD web do projeto **Senai Joinville**, escrito em PHP puro (sem framework) sobre MySQL.
 O código foi organizado para ser **lido de cima para baixo** e **alterado em poucos lugares**:
 cada arquivo começa com um comentário dizendo o que faz, qual requisito (RF/RN) atende e como adaptar.
 
@@ -8,27 +8,28 @@ cada arquivo começa com um comentário dizendo o que faz, qual requisito (RF/RN
 
 | Item | Versão |
 |---|---|
-| PHP | 8.0 ou superior, com as extensões **pdo_pgsql** e **mbstring** |
-| PostgreSQL | 12 ou superior |
+| PHP | 8.0 ou superior, com as extensões **pdo_mysql** e **mbstring** |
+| MySQL | 8.0 ou superior (MariaDB 10.4+ também deve funcionar) |
 
-Verificar: `php -m | grep -E "pdo_pgsql|mbstring"` (Windows: `php -m | findstr /i "pgsql mbstring"`).
-Se faltar alguma, abra o `php.ini` e remova o `;` das linhas `extension=pdo_pgsql` e `extension=mbstring`.
+Verificar: `php -m | grep -E "pdo_mysql|mbstring"` (Windows: `php -m | findstr /i "mysql mbstring"`).
+Se faltar alguma, abra o `php.ini` e remova o `;` das linhas `extension=pdo_mysql` e `extension=mbstring`.
 
 ## 2. Instalação (uma vez)
 
 ```bash
-# 1) criar o banco
-psql -U postgres -c "CREATE DATABASE bloco_notas ENCODING 'UTF8'"
+# 1) criar banco, tabelas, função, triggers e views (o script cria o banco "bloco_notas")
+mysql -u root -p < banco/schema.sql
 
-# 2) criar tabelas, funções, triggers e views
-psql -U postgres -d bloco_notas -f banco/schema.sql
-
-# 3) ajustar usuário/senha do banco em config/config.php
+# 2) ajustar usuário/senha do banco em config/config.php
 #    (ou use as variáveis de ambiente DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
 
-# 4) (opcional) dados de exemplo — senha de todos: senha1234
+# 3) (opcional) dados de exemplo — senha de todos: senha1234
 php banco/semear.php
 ```
+
+Sem o cliente `mysql` no terminal? O `schema.sql` também pode ser importado pelo MySQL Workbench
+(*File → Run SQL Script*) ou pelo phpMyAdmin (*Importar*). Não rode o arquivo por um driver (PDO, etc.):
+ele usa a linha `DELIMITER`, que só esses clientes entendem.
 
 ## 3. Executar
 
@@ -43,7 +44,7 @@ Abra <http://localhost:8000>. Logins de exemplo: `admin@senai.exemplo`, `maria@s
 ```
 bloco-notas-php/
 ├── banco/
-│   ├── schema.sql          tabelas, funções, triggers, views (PostgreSQL)
+│   ├── schema.sql          banco, tabelas, função, triggers, views (MySQL)
 │   └── semear.php          dados de exemplo
 ├── config/
 │   └── config.php          banco, tamanho mínimo da senha, limite de tentativas
@@ -53,7 +54,7 @@ bloco-notas-php/
 └── src/
     ├── nucleo/             infraestrutura (você raramente mexe)
     │   ├── bootstrap.php   inicia tudo (config, sessão, carrega arquivos)
-    │   ├── db.php          conexão PDO e funções consultar/executar/transacao
+    │   ├── db.php          conexão PDO e funções consultar/executar/ultimo_id/transacao
     │   └── helpers.php     e(), url(), flash, CSRF, login, renderizar()
     ├── modelos/            REGRAS DE NEGÓCIO + SQL  ← onde vive o CRUD
     │   ├── usuarios.php   notas.php   temas.php
@@ -82,12 +83,12 @@ Temas, compartilhamento, histórico e administração seguem o mesmo padrão (ve
 
 ## 6. De onde veio cada parte do script MySQL
 
-As *procedures* `sp_*` foram para o PHP (mais fácil de ler e depurar). O banco manteve o que **não pode falhar**.
+O script MySQL original tinha *procedures* `sp_*`. Elas foram para o PHP (mais fácil de ler e depurar). O banco manteve o que **não pode falhar**.
 
 | Script MySQL | Agora |
 |---|---|
 | tabelas, UNIQUE, FOREIGN KEY | `banco/schema.sql` (seção 2) |
-| `fn_permissao_nota` | `banco/schema.sql` — mesma função, em PostgreSQL |
+| `fn_permissao_nota` | `banco/schema.sql` (seção 3) |
 | triggers do histórico (`trg_notas_ai/au`, imutável) | `banco/schema.sql` (seção 4) |
 | views `vw_historico_detalhado`, `vw_temas_resumo` | `banco/schema.sql` (seção 5) |
 | `sp_login_falho`, `sp_login_ok` | `usuario_registrar_falha_login()`, `usuario_autenticar()` em `modelos/usuarios.php` |
@@ -96,10 +97,10 @@ As *procedures* `sp_*` foram para o PHP (mais fácil de ler e depurar). O banco 
 | `sp_compartilhar_nota`, `sp_descompartilhar_nota` | `modelos/compartilhamentos.php` |
 | `sp_excluir_tema` | `tema_excluir()` em `modelos/temas.php` |
 | consultas 10.2 a 10.7 | `notas_listar()`, `nota_obter()`, `historico_listar()` |
-| `@usuario_id_atual` | `set_config('app.usuario_id', ...)` dentro de `transacao()` |
+| `@usuario_id_atual` | `SET @usuario_id_atual = ...` dentro de `transacao()` |
 
 ### Como o histórico funciona (RN-05)
-Toda escrita em `notas` passa por `transacao($uid, ...)` (`src/nucleo/db.php`). Ela diz ao banco **quem** está agindo; os **triggers** gravam o histórico sozinhos. Sem informar o usuário, o banco recusa a alteração. O PHP nunca insere em `historico_alteracoes`.
+Toda escrita em `notas` passa por `transacao($uid, ...)` (`src/nucleo/db.php`). Ela diz ao banco **quem** está agindo (variável de sessão `@usuario_id_atual`, zerada ao terminar); os **triggers** gravam o histórico sozinhos. Sem informar o usuário, o banco recusa a alteração. O PHP nunca insere em `historico_alteracoes`.
 
 ## 7. Requisitos da ficha → onde estão
 
@@ -111,7 +112,7 @@ Toda escrita em `notas` passa por `transacao($uid, ...)` (`src/nucleo/db.php`). 
 | RF-05 histórico / RF-06 restaurar | `modelos/historico.php` + triggers |
 | RF-07 abas | *não implementada*: usa as abas do navegador (tabela `abas_abertas` ficou opcional no schema) |
 | RF-08 temas | `modelos/temas.php`, filtro em `notas_listar()` |
-| RF-09 busca | `notas_listar()` (índice de texto completo + `ILIKE`) |
+| RF-09 busca | `notas_listar()` (`LIKE`, sem diferenciar maiúsculas/acentos; índice `FULLTEXT` disponível no schema) |
 | RF-10 administração | `controladores/admin.php`, `modelos/usuarios.php` |
 | RN-10 bloqueio por tentativas | `usuario_registrar_falha_login()`; números em `config.php` |
 | RNF-02 senha com hash | `password_hash()` em `usuario_criar()` |
@@ -148,10 +149,14 @@ Toda escrita em `notas` passa por `transacao($uid, ...)` (`src/nucleo/db.php`). 
 
 | Sintoma | Causa provável |
 |---|---|
-| `could not find driver` | extensão `pdo_pgsql` desligada no `php.ini` |
-| `password authentication failed` | usuário/senha em `config/config.php` |
-| `database "bloco_notas" does not exist` | passo 1 da instalação não foi feito |
-| `relation "usuarios" does not exist` | `schema.sql` não foi executado nesse banco |
-| `RN-05: defina app.usuario_id...` | algum código alterou `notas` fora de `transacao()` |
+| `could not find driver` | extensão `pdo_mysql` desligada no `php.ini` |
+| `Access denied for user` (1045) | usuário/senha em `config/config.php` |
+| `Connection refused` | MySQL desligado, ou host/porta errados em `config.php` |
+| `Unknown database 'bloco_notas'` (1049) | `schema.sql` ainda não foi executado |
+| `Table 'bloco_notas.usuarios' doesn't exist` (1146) | `schema.sql` foi executado em outro banco ou falhou no meio |
+| erro de sintaxe perto de `DELIMITER` | `schema.sql` foi executado por um driver; use o cliente `mysql`, Workbench ou phpMyAdmin |
+| `You do not have the SUPER privilege and binary logging is enabled` (1419) | função/trigger criados por usuário sem SUPER; rode o `schema.sql` como `root` ou, em desenvolvimento, `SET GLOBAL log_bin_trust_function_creators = 1;` |
+| `RN-05: defina @usuario_id_atual...` | algum código alterou `notas` fora de `transacao()` |
 | `Call to undefined function mb_strlen()` | extensão `mbstring` desligada no `php.ini` |
 | "Página não encontrada" | a rota digitada em `?r=` não existe na tabela `$rotas` |
+| Acentos aparecem como `Ã§` ou `?` | banco/tabelas fora de `utf8mb4`; recrie com o `schema.sql` |

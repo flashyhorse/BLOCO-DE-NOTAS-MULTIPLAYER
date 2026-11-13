@@ -34,7 +34,7 @@ function compartilhar_nota(int $dono_id, int $nota_id, string $email_convidado, 
         throw new ErroApp('Somente o dono altera o compartilhamento.', 403);
     }
     $convidado = consultar_um(
-        'SELECT id FROM usuarios WHERE lower(email) = :e AND bloqueado = FALSE',
+        'SELECT id FROM usuarios WHERE email = :e AND bloqueado = 0',
         ['e' => strtolower(trim($email_convidado))]
     );
     if (!$convidado) {
@@ -44,12 +44,14 @@ function compartilhar_nota(int $dono_id, int $nota_id, string $email_convidado, 
         throw new ErroApp('O dono já tem acesso total à nota.');
     }
 
-    // Se já existe compartilhamento, só atualiza a permissão (ON CONFLICT = "upsert").
+    // Se já existe compartilhamento (UNIQUE nota_id + usuario_id), só atualiza a
+    // permissão (ON DUPLICATE KEY UPDATE = "upsert"). O valor vai duas vezes,
+    // com nomes diferentes (:p e :p2), porque o MySQL não aceita o mesmo nome 2x.
     executar(
         'INSERT INTO compartilhamentos (nota_id, usuario_id, permissao)
          VALUES (:n, :u, :p)
-         ON CONFLICT (nota_id, usuario_id) DO UPDATE SET permissao = EXCLUDED.permissao',
-        ['n' => $nota_id, 'u' => $convidado['id'], 'p' => $permissao]
+         ON DUPLICATE KEY UPDATE permissao = :p2',
+        ['n' => $nota_id, 'u' => $convidado['id'], 'p' => $permissao, 'p2' => $permissao]
     );
 }
 

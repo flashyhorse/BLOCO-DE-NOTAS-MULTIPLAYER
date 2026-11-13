@@ -33,18 +33,19 @@ function usuario_criar(string $nome, string $email, string $senha, string $perfi
     $hash = password_hash($senha, PASSWORD_DEFAULT);   // bcrypt; nunca guarde a senha pura
 
     try {
-        $r = consultar_um(
+        executar(
             'INSERT INTO usuarios (nome, email, senha_hash, perfil)
-             VALUES (:nome, :email, :hash, :perfil) RETURNING id',
+             VALUES (:nome, :email, :hash, :perfil)',
             ['nome' => $nome, 'email' => $email, 'hash' => $hash, 'perfil' => $perfil]
         );
+        $id = ultimo_id();
     } catch (PDOException $e) {
         if (erro_duplicado($e)) {                                          // RN-01
             throw new ErroApp('Já existe um usuário com este e-mail.');
         }
         throw $e;
     }
-    return (int) $r['id'];
+    return $id;
 }
 
 /**
@@ -55,11 +56,12 @@ function usuario_criar(string $nome, string $email, string $senha, string $perfi
  */
 function usuario_autenticar(string $email, string $senha): array
 {
+    // "email = :email" já ignora maiúsculas/minúsculas (collation utf8mb4_unicode_ci).
     $u = consultar_um(
         'SELECT id, nome, perfil, senha_hash, bloqueado,
-                (bloqueado_ate IS NOT NULL AND bloqueado_ate > now()) AS bloqueio_temporario
+                (bloqueado_ate IS NOT NULL AND bloqueado_ate > NOW()) AS bloqueio_temporario
            FROM usuarios
-          WHERE lower(email) = :email',
+          WHERE email = :email',
         ['email' => strtolower(trim($email))]
     );
 
@@ -87,9 +89,10 @@ function usuario_autenticar(string $email, string $senha): array
 /**
  * RN-10: soma uma tentativa errada; ao atingir o limite, bloqueia por X
  * minutos e zera o contador. Os números vêm de config/config.php.
- * (Em PostgreSQL, todas as expressões do SET enxergam os valores
- * ANTIGOS da linha - por isso a ordem das colunas não importa, ao
- * contrário do MySQL.)
+ * ATENÇÃO À ORDEM: no UPDATE do MySQL as colunas são atribuídas da
+ * esquerda para a direita. Por isso bloqueado_ate vem ANTES de
+ * tentativas_login (assim ele ainda enxerga o valor antigo do contador).
+ * Não inverta a ordem das duas linhas do SET.
  */
 function usuario_registrar_falha_login(int $id): void
 {
@@ -100,7 +103,7 @@ function usuario_registrar_falha_login(int $id): void
     executar(
         "UPDATE usuarios SET
             bloqueado_ate    = CASE WHEN tentativas_login + 1 >= {$max}
-                                    THEN now() + INTERVAL '{$min} minutes'
+                                    THEN NOW() + INTERVAL {$min} MINUTE
                                     ELSE bloqueado_ate END,
             tentativas_login = CASE WHEN tentativas_login + 1 >= {$max}
                                     THEN 0
@@ -116,7 +119,7 @@ function usuarios_listar(): array
 {
     return consultar(
         'SELECT id, nome, email, perfil, bloqueado,
-                (bloqueado_ate IS NOT NULL AND bloqueado_ate > now()) AS bloqueio_temporario
+                (bloqueado_ate IS NOT NULL AND bloqueado_ate > NOW()) AS bloqueio_temporario
            FROM usuarios
           ORDER BY nome'
     );

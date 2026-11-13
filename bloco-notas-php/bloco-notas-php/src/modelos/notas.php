@@ -39,15 +39,15 @@ function notas_listar(int $uid, string $busca = '', ?int $tema_id = null): array
     $params  = ['u' => $uid];
 
     if ($busca !== '') {
-        // 1) busca de texto completo (usa o índice ft_notas_busca)
-        // 2) OU ILIKE, que também acha termos curtos (ex.: "SQL")
+        // LIKE com a collation utf8mb4_unicode_ci: ignora maiúsculas e acentos
+        // ("acao" acha "Ação") e aceita termos curtos (ex.: "SQL").
+        // O \ antes de % e _ faz o usuário buscar esses caracteres literalmente.
+        // Para busca por relevância, o schema tem o índice FULLTEXT ft_notas_busca
+        // (MATCH ... AGAINST), que exige colunas da tabela notas, e não desta subconsulta.
         $like = '%' . addcslashes($busca, '%_\\') . '%';
-        $filtros[] = "(to_tsvector('portuguese', x.titulo || ' ' || x.conteudo)
-                         @@ plainto_tsquery('portuguese', :b1)
-                       OR x.titulo ILIKE :b2 OR x.conteudo ILIKE :b3)";
-        $params['b1'] = $busca;
+        $filtros[] = '(x.titulo LIKE :b1 OR x.conteudo LIKE :b2)';
+        $params['b1'] = $like;
         $params['b2'] = $like;
-        $params['b3'] = $like;
     }
     if ($tema_id) {
         $filtros[] = 'EXISTS (SELECT 1 FROM notas_temas nt WHERE nt.nota_id = x.id AND nt.tema_id = :tema)';
@@ -60,7 +60,7 @@ function notas_listar(int $uid, string $busca = '', ?int $tema_id = null): array
                            fn_permissao_nota(n.id, :u) AS permissao
                       FROM notas n
                       JOIN usuarios u ON u.id = n.dono_id
-                     WHERE n.excluida = FALSE) x
+                     WHERE n.excluida = 0) x
              WHERE ' . implode(' AND ', $filtros) . '
              ORDER BY x.atualizado_em DESC';
 
@@ -76,7 +76,7 @@ function nota_obter(int $id, int $uid): array
                 fn_permissao_nota(n.id, :u) AS permissao
            FROM notas n
            JOIN usuarios u ON u.id = n.dono_id
-          WHERE n.id = :n AND n.excluida = FALSE',
+          WHERE n.id = :n AND n.excluida = 0',
         ['u' => $uid, 'n' => $id]
     );
     if (!$n) {
@@ -113,11 +113,11 @@ function nota_criar(int $uid, string $titulo, string $conteudo, array $temas_ids
     validar_titulo_nota($titulo);
 
     return transacao($uid, function () use ($uid, $titulo, $conteudo, $temas_ids) {
-        $r = consultar_um(
-            'INSERT INTO notas (dono_id, titulo, conteudo) VALUES (:d, :t, :c) RETURNING id',
+        executar(
+            'INSERT INTO notas (dono_id, titulo, conteudo) VALUES (:d, :t, :c)',
             ['d' => $uid, 't' => $titulo, 'c' => $conteudo]
         );
-        $id = (int) $r['id'];
+        $id = ultimo_id();   // logo após o INSERT (o trigger do histórico também insere, mas não altera este valor)
         nota_definir_temas($id, $uid, $temas_ids);
         return $id;
     });
@@ -156,7 +156,7 @@ function nota_excluir(int $uid, int $id): void
         throw new ErroApp('Somente o dono pode excluir a nota.', 403);
     }
     transacao($uid, fn() => executar(
-        'UPDATE notas SET excluida = TRUE, excluida_em = now() WHERE id = :id',
+        'UPDATE notas SET excluida = 1, excluida_em = NOW() WHERE id = :id',
         ['id' => $id]
     ));
 }
@@ -171,10 +171,10 @@ function nota_definir_temas(int $nota_id, int $dono_id, array $temas_ids): void
 {
     executar('DELETE FROM notas_temas WHERE nota_id = :n', ['n' => $nota_id]);
     foreach (array_unique(array_map('intval', $temas_ids)) as $tema_id) {
-        // CAST(... AS integer): sem ele o PostgreSQL não sabe o tipo do parâmetro no SELECT.
+        // CAST(... AS UNSIGNED): o parâmetro chega como texto; aqui vira número, como a coluna.
         executar(
             'INSERT INTO notas_temas (nota_id, tema_id)
-             SELECT CAST(:n AS integer), id FROM temas WHERE id = :t AND usuario_id = :d',
+             SELECT CAST(:n AS UNSIGNED), id FROM temas WHERE id = :t AND usuario_id = :d',
             ['n' => $nota_id, 't' => $tema_id, 'd' => $dono_id]
         );
     }

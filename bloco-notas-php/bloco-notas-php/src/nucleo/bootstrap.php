@@ -6,7 +6,7 @@
      2. define a classe de erro da aplicação (ErroApp)
      3. carrega helpers, banco e modelos
      4. inicia a sessão (login) - só quando é navegador, não no terminal
-   Requer PHP 8.0+ com a extensão pdo_pgsql habilitada.
+   Requer PHP 8.0+ com as extensões pdo_mysql e mbstring habilitadas.
    ===================================================================== */
 
 define('RAIZ', dirname(__DIR__, 2));   // pasta raiz do projeto
