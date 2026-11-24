@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "cypress": "^16.3.0"
+  },
+  "name": "auto",
+  "version": "1.0.0",
+  "main": "index.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "open": "cypress open"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
